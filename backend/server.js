@@ -1,6 +1,8 @@
 
 require("dotenv").config();
 const createEmailRouter = require("./routes/emailRoutes");
+const createCalendarRouter = require("./routes/calendarRoutes");
+const createAiRouter = require("./routes/aiRoutes");
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
@@ -13,12 +15,28 @@ const GmailOAuthState = require("./models/GmailOAuthState");
 
 const app = express();
 app.use(cors());
-app.use(express.json());
-// After line 16: app.use(express.json());
-// Add this at the top level (NOT inside any function):
+app.use(express.json({ limit: "30mb" }));
+app.use(express.urlencoded({ extended: true, limit: "30mb" }));
+
 app.use(
   "/api",
   createEmailRouter({
+    requireClerkUser,
+    decryptToken,
+  })
+);
+
+app.use(
+  "/api",
+  createCalendarRouter({
+    requireClerkUser,
+    decryptToken,
+  })
+);
+
+app.use(
+  "/api",
+  createAiRouter({
     requireClerkUser,
     decryptToken,
   })
@@ -138,11 +156,14 @@ async function requireClerkUser(req, res, next) {
   }
 }
 
-function redirectToApp(result) {
+function redirectToApp(result, extraParams = {}) {
   const base = process.env.EXPO_REDIRECT_URI;
   const separator = base.includes("?") ? "&" : "?";
-
-  return `${base}${separator}gmail=${encodeURIComponent(result)}`;
+  let url = `${base}${separator}gmail=${encodeURIComponent(result)}`;
+  for (const [k, v] of Object.entries(extraParams)) {
+    url += `&${encodeURIComponent(k)}=${encodeURIComponent(v)}`;
+  }
+  return url;
 }
 
 app.get("/health", (req, res) => {
@@ -278,7 +299,14 @@ app.get("/auth/google/callback", async (req, res) => {
       { upsert: true, new: true, runValidators: true }
     );
 
-    return res.redirect(redirectToApp("connected"));
+    const grantedScopes = tokens.scope || "";
+    const calendarGranted = grantedScopes.includes("calendar");
+
+    return res.redirect(
+      redirectToApp("connected", {
+        calendar: calendarGranted ? "connected" : "none",
+      })
+    );
   } catch (error) {
     console.error(
       "Gmail OAuth callback failed:",
