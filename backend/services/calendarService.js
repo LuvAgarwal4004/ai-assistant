@@ -141,7 +141,12 @@ async function createEvent({
   pushToGoogle = true,
 }) {
   const parsedStartDate = new Date(startDate);
-  const parsedEndDate = endDate ? new Date(endDate) : new Date(parsedStartDate.getTime() + 3600000);
+  if (isNaN(parsedStartDate.getTime())) {
+    throw new Error("Invalid startDate provided for calendar event.");
+  }
+  const parsedEndDate = endDate && !isNaN(new Date(endDate).getTime())
+    ? new Date(endDate)
+    : new Date(parsedStartDate.getTime() + 3600000);
 
   let googleEventId = null;
 

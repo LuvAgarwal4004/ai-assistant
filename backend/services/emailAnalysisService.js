@@ -2,6 +2,31 @@ const Email = require("../models/Email");
 const EmailAnalysisJob = require("../models/EmailAnalysisJob");
 const UserMemory = require("../models/UserMemory");
 
+function extractJson(text) {
+  if (!text || typeof text !== "string") return null;
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {}
+
+  const codeBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch) {
+    try {
+      return JSON.parse(codeBlockMatch[1].trim());
+    } catch {}
+  }
+
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1));
+    } catch {}
+  }
+
+  return null;
+}
+
 function ruleAnalysis(email, userMemory = null) {
   const subject = String(email.subject || "").toLowerCase();
   const sender = String(email.from || "").toLowerCase();
@@ -197,7 +222,8 @@ User Personal AI Memory & Preferences:
 
   if (!output) throw new Error("Gemini returned an empty analysis.");
 
-  const parsed = JSON.parse(output);
+  const parsed = extractJson(output);
+  if (!parsed) throw new Error("Gemini returned invalid JSON analysis.");
   const validCategories = [
     "work", "personal", "finance", "travel",
     "promotion", "social", "updates", "other",

@@ -3,6 +3,31 @@ const CalendarEvent = require("../models/CalendarEvent");
 const Email = require("../models/Email");
 const { createEvent, getGoogleCalendarClient } = require("./calendarService");
 
+function extractJson(text) {
+  if (!text || typeof text !== "string") return null;
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {}
+
+  const codeBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch) {
+    try {
+      return JSON.parse(codeBlockMatch[1].trim());
+    } catch {}
+  }
+
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1));
+    } catch {}
+  }
+
+  return null;
+}
+
 function getGeminiEndpoint(modelName) {
   const apiKey = process.env.GEMINI_API_KEY;
   const model = modelName || process.env.GEMINI_MODEL || "gemini-2.5-flash";
@@ -12,6 +37,11 @@ function getGeminiEndpoint(modelName) {
 }
 
 async function callGemini(payload) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured in backend environment.");
+  }
+
   const models = [
     process.env.GEMINI_MODEL || "gemini-2.5-flash",
     "gemini-2.5-flash",
@@ -161,15 +191,10 @@ Return STRICT JSON with the following structure:
   };
 
   const rawJson = await callGemini(payload);
-  let parsed;
-  try {
-    parsed = JSON.parse(rawJson);
-  } catch (err) {
-    parsed = {
-      reply: rawJson.replace(/^```json/, "").replace(/```$/, "").trim(),
-      actions: {},
-    };
-  }
+  const parsed = extractJson(rawJson) || {
+    reply: typeof rawJson === "string" ? rawJson.replace(/```(?:json)?/g, "").replace(/```/g, "").trim() : "Done!",
+    actions: {},
+  };
 
   const executedActions = {
     scheduled: [],
@@ -338,7 +363,7 @@ Return STRICT JSON matching this format:
   };
 
   const rawJson = await callGemini(payload);
-  const parsed = JSON.parse(rawJson);
+  const parsed = extractJson(rawJson) || { summary: "", events: [] };
 
   const importedEvents = [];
   const events = Array.isArray(parsed.events) ? parsed.events : [];

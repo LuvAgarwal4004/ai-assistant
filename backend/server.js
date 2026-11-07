@@ -15,6 +15,15 @@ const GmailOAuthState = require("./models/GmailOAuthState");
 
 const app = express();
 app.use(cors());
+
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  next();
+});
+
 app.use(express.json({ limit: "30mb" }));
 app.use(express.urlencoded({ extended: true, limit: "30mb" }));
 
@@ -388,7 +397,25 @@ app.delete("/api/gmail/disconnect", requireClerkUser, async (req, res) => {
   }
 });
 
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: "Endpoint not found." });
+});
+
+// Centralized error handler
+app.use((err, req, res, next) => {
+  console.error("Unhandled server error:", err);
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({
+    error: status === 500 ? "Internal server error." : err.message,
+  });
+});
+
 async function startServer() {
+  if (!process.env.GEMINI_API_KEY) {
+    console.warn("WARNING: GEMINI_API_KEY is not set. AI Copilot features will be unavailable.");
+  }
+
   await mongoose.connect(process.env.MONGODB_URI);
 
   console.log("MongoDB connected successfully.");

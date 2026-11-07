@@ -1,6 +1,6 @@
 
 import { useAuth } from "@clerk/expo";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -61,6 +61,7 @@ function priorityColor(priority: string) {
 }
 
 export default function InboxScreen() {
+  const router = useRouter();
   const { getToken } = useAuth();
 
   const [emails, setEmails] = useState<EmailItem[]>([]);
@@ -69,6 +70,7 @@ export default function InboxScreen() {
   const [appliedSearch, setAppliedSearch] = useState("");
   const [priority, setPriority] = useState("");
   const [days, setDays] = useState<30 | 60>(30);
+  const [page, setPage] = useState(1);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -109,7 +111,6 @@ export default function InboxScreen() {
     [getToken]
   );
 
-
   const loadEmails = useCallback(
     async (pageToLoad = 1, append = false) => {
       const requestId = ++listRequestId.current;
@@ -117,6 +118,7 @@ export default function InboxScreen() {
       const params = new URLSearchParams();
       params.set("page", String(pageToLoad));
       params.set("limit", "30");
+      params.set("days", String(days));
 
       // Only send q when a search is actually applied.
       if (appliedSearch.trim()) {
@@ -128,41 +130,49 @@ export default function InboxScreen() {
         params.set("priority", priority);
       }
 
-      const data = await request(`/api/emails?${params.toString()}`);
+      try {
+        const data = await request(`/api/emails?${params.toString()}`);
 
-      // Ignore responses belonging to an older search or filter.
-      if (
-        !mountedRef.current ||
-        requestId !== listRequestId.current
-      ) {
-        return;
+        // Ignore responses belonging to an older search or filter.
+        if (
+          !mountedRef.current ||
+          requestId !== listRequestId.current
+        ) {
+          return;
+        }
+
+        const incoming: EmailItem[] = data.emails || [];
+
+        if (append) {
+          setEmails((current) => {
+            const existingIds = new Set(current.map((email) => email._id));
+            const newEmails = incoming.filter(
+              (email: EmailItem) => !existingIds.has(email._id)
+            );
+
+            return [...current, ...newEmails];
+          });
+        } else {
+          setEmails(incoming);
+        }
+
+        setPage(pageToLoad);
+        setHasMore(Boolean(data.hasMore));
+        setTotalMatching(Number(data.total || 0));
+      } finally {
+        if (mountedRef.current && !append) {
+          setLoading(false);
+        }
       }
-
-      if (append) {
-        setEmails((current) => {
-          const existingIds = new Set(current.map((email) => email._id));
-          const newEmails = (data.emails || []).filter(
-            (email: EmailItem) => !existingIds.has(email._id)
-          );
-
-          return [...current, ...newEmails];
-        });
-      } else {
-        setEmails(data.emails || []);
-      }
-
-      setHasMore(Boolean(data.hasMore));
-      setTotalMatching(Number(data.total || 0));
     },
-    [request, appliedSearch, priority]
+    [request, appliedSearch, priority, days]
   );
-
 
   useEffect(() => {
     let cancelled = false;
 
     const timer = setTimeout(() => {
-      loadEmails().catch((err) => {
+      loadEmails(1, false).catch((err) => {
         if (cancelled) return;
 
         setError(
@@ -200,9 +210,7 @@ export default function InboxScreen() {
     setError("");
 
     try {
-      // Each page contains up to 30 emails.
-      const nextPage = Math.floor(emails.length / 30) + 1;
-
+      const nextPage = page + 1;
       await loadEmails(nextPage, true);
     } catch (err) {
       setError(
@@ -217,8 +225,7 @@ export default function InboxScreen() {
         setLoadingMore(false);
       }
     }
-  }, [emails.length, hasMore, loading, syncing, loadEmails]);
-
+  }, [page, hasMore, loading, syncing, loadEmails]);
 
   const syncNow = useCallback(
     async (_continueImport = false) => {
@@ -256,14 +263,13 @@ export default function InboxScreen() {
             );
           }
 
-          await Promise.all([loadEmails(), loadStatus()]);
+          await Promise.all([loadEmails(1, false), loadStatus()]);
         } while (result.hasMore);
 
-        setHasMore(false);
         setError("");
 
         // Reload the final list after the last page.
-        await Promise.all([loadEmails(), loadStatus()]);
+        await Promise.all([loadEmails(1, false), loadStatus()]);
       } catch (err) {
         setError(
           err instanceof Error
@@ -362,12 +368,20 @@ export default function InboxScreen() {
 
   return (
     <View className="flex-1 bg-slate-950 px-4 pt-14">
+      <Pressable
+        onPress={() => router.back()}
+        className="mb-4 flex-row items-center self-start"
+      >
+        <Text className="text-sm font-semibold text-emerald-400">
+          ← Back to Dashboard
+        </Text>
+      </Pressable>
+
       <View className="mb-5 flex-row items-center justify-between">
         <View>
           <Text className="text-3xl font-bold text-white">Inbox</Text>
           <Text className="mt-1 text-sm text-slate-400">
-            {syncStatus?.totalEmails ?? emails.length} stored messages
-            {totalMatching} matching emails
+            {syncStatus?.totalEmails ?? emails.length} stored · {totalMatching} matching ({days} days)
           </Text>
         </View>
 
@@ -386,7 +400,12 @@ export default function InboxScreen() {
         {([30, 60] as const).map((value) => (
           <Pressable
             key={value}
-            onPress={() => setDays(value)}
+            onPress={() => {
+              if (days !== value) {
+                setDays(value);
+                setPage(1);
+              }
+            }}
             className={`rounded-full px-4 py-2 ${days === value ? "bg-emerald-400" : "bg-slate-800"
               }`}
           >
@@ -410,9 +429,13 @@ export default function InboxScreen() {
             // Clearing the text immediately removes the active search filter.
             if (value.trim() === "") {
               setAppliedSearch("");
+              setPage(1);
             }
           }}
-          onSubmitEditing={() => setAppliedSearch(search.trim())}
+          onSubmitEditing={() => {
+            setAppliedSearch(search.trim());
+            setPage(1);
+          }}
           placeholder="Search sender, subject or content..."
           placeholderTextColor="#94a3b8"
           returnKeyType="search"
@@ -422,7 +445,10 @@ export default function InboxScreen() {
 
 
         <Pressable
-          onPress={() => setAppliedSearch(search.trim())}
+          onPress={() => {
+            setAppliedSearch(search.trim());
+            setPage(1);
+          }}
           className="justify-center rounded-xl bg-slate-700 px-4"
         >
           <Text className="font-semibold text-white">Search</Text>
@@ -444,7 +470,10 @@ export default function InboxScreen() {
         ].map((item) => (
           <Pressable
             key={item.value || "all"}
-            onPress={() => setPriority(item.value)}
+            onPress={() => {
+              setPriority(item.value);
+              setPage(1);
+            }}
             className={`rounded-full px-4 py-2 ${priority === item.value ? "bg-indigo-500" : "bg-slate-800"
               }`}
           >
@@ -473,17 +502,7 @@ export default function InboxScreen() {
           : ""}
       </Text>
 
-      {hasMore && (
-        <Pressable
-          onPress={() => void syncNow(true)}
-          disabled={syncing}
-          className="mb-4 rounded-xl border border-emerald-500 px-4 py-3"
-        >
-          <Text className="text-center font-semibold text-emerald-300">
-            Continue import
-          </Text>
-        </Pressable>
-      )}
+      {/* Continue import button is hidden per request */}
 
       {loading && emails.length === 0 ? (
         <ActivityIndicator size="large" color="#34d399" />
@@ -491,6 +510,19 @@ export default function InboxScreen() {
 
         <ScrollView
           className="flex-1"
+          onScroll={(event) => {
+            const { contentOffset, contentSize, layoutMeasurement } =
+              event.nativeEvent;
+
+            const distanceFromBottom =
+              contentSize.height -
+              layoutMeasurement.height -
+              contentOffset.y;
+
+            if (distanceFromBottom < 300) {
+              void loadMoreEmails();
+            }
+          }}
           onMomentumScrollEnd={(event) => {
             const { contentOffset, contentSize, layoutMeasurement } =
               event.nativeEvent;
@@ -504,7 +536,7 @@ export default function InboxScreen() {
               void loadMoreEmails();
             }
           }}
-          scrollEventThrottle={16}
+          scrollEventThrottle={100}
           refreshControl={
 
             <RefreshControl

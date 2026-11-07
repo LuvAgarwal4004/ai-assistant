@@ -25,6 +25,8 @@ backend/.env
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+*.log
+*-log.txt
 
 # macOS
 .DS_Store

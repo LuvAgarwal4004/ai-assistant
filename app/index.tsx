@@ -175,7 +175,7 @@ export default function HomeScreen() {
             for (const mins of ev.reminders) {
               void scheduleAdvanceReminder({
                 title: ev.title,
-                body: `[Priority: ${ev.priority.toUpperCase()}] ${ev.description || "Upcoming event"}`,
+                body: `[Priority: ${(ev.priority || "medium").toUpperCase()}] ${ev.description || "Upcoming event"}`,
                 date: ev.startDate,
                 minutesBefore: mins,
                 identifier: `event-${ev._id}-${mins}`,
@@ -343,8 +343,16 @@ export default function HomeScreen() {
   // Selected date events
   const selectedDayData = useMemo(() => {
     if (!selectedDate) return [];
-    return dateEventMap.get(selectedDate)?.items || [];
-  }, [selectedDate, dateEventMap]);
+    const items = dateEventMap.get(selectedDate)?.items || [];
+    if (!search.trim()) return items;
+    const q = search.trim().toLowerCase();
+    return items.filter(
+      (item) =>
+        item.title?.toLowerCase().includes(q) ||
+        item.description?.toLowerCase().includes(q) ||
+        item.category?.toLowerCase().includes(q)
+    );
+  }, [selectedDate, dateEventMap, search]);
 
   // Handle AI Chat submission
   const handleSendAiMessage = async (customPrompt?: string) => {
@@ -396,7 +404,7 @@ export default function HomeScreen() {
             for (const mins of ev.reminders) {
               void scheduleAdvanceReminder({
                 title: ev.title,
-                body: `[Priority: ${ev.priority.toUpperCase()}] Starting soon!`,
+                body: `[Priority: ${(ev.priority || "medium").toUpperCase()}] Starting soon!`,
                 date: ev.startDate,
                 minutesBefore: mins,
               });
@@ -514,8 +522,12 @@ export default function HomeScreen() {
 
     try {
       const headers = await getAuthHeaders();
-      const [year, month, day] = selectedDate.split("-").map(Number);
+      const [year, month, day] = (selectedDate || toDateString(new Date())).split("-").map(Number);
       const eventDate = new Date(year, month - 1, day, 10, 0, 0);
+      if (isNaN(eventDate.getTime())) {
+        Alert.alert("Invalid Date", "Please select a valid date.");
+        return;
+      }
 
       const res = await fetch(`${API_URL}/api/calendar/events`, {
         method: "POST",
@@ -574,6 +586,7 @@ export default function HomeScreen() {
 
       {/* SIDEBAR DRAWER */}
       <View
+        pointerEvents={sidebarOpen ? "auto" : "none"}
         className={`absolute left-0 top-0 z-30 h-full w-72 bg-slate-900 px-5 pb-8 pt-14 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}

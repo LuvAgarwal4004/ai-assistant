@@ -70,6 +70,12 @@ function createEmailRouter({ requireClerkUser, decryptToken }) {
 
       const filter = { clerkUserId: req.clerkUserId };
 
+      const days = Number(req.query.days);
+      if ([30, 60].includes(days)) {
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        filter.receivedAt = { $gte: cutoff };
+      }
+
       if (["high", "medium", "low"].includes(priority)) {
         filter.priority = priority;
       }

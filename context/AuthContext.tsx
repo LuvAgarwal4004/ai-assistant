@@ -7,7 +7,7 @@ import React, {
 
 import * as SecureStore from "expo-secure-store";
 
-const API_URL = "YOUR_WEBSITE_URL";
+const API_URL = (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/+$/, "");
 
 type User = {
   id: string;
